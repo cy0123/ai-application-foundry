@@ -1,0 +1,147 @@
+name: Promote Genie agent
+
+"on":
+  workflow_dispatch:
+    inputs:
+      source_genie_name:
+        description: Development Genie agent title
+        default: source_genie_name
+        type: string
+
+      target_genie_name:
+        description: Test Genie agent title
+        default: test_genie_name
+        type: string
+
+      source_space_id:
+        description: Development Genie space ID; leave empty to look up by title
+        required: false
+        type: string
+
+      target_space_id:
+        description: Existing test Genie space ID; leave empty to look up or create
+        required: false
+        type: string
+
+      test_parent_path:
+        description: Workspace folder for the test agent
+        required: false
+        type: string
+
+      git_folder_path:
+        description: Databricks Git folder path to update
+        required: false
+        type: string
+
+      commit_bundle:
+        description: Commit generated bundle files to the repository
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: promote-genie-agent
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    name: Export and deploy Genie agent
+    runs-on: ubuntu-latest
+
+    # Configure this as a protected GitHub environment with required approval.
+    environment:
+      name: databricks-test
+
+    env:
+      DATABRICKS_AUTH_TYPE: azure-client-secret
+
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      # Configure these as GitHub environment or repository variables.
+      DEV_DATABRICKS_HOST: ${{ vars.DEV_DATABRICKS_HOST }}
+      TEST_DATABRICKS_HOST: ${{ vars.TEST_DATABRICKS_HOST }}
+
+      SOURCE_GENIE_NAME: ${{ inputs.source_genie_name || 'source_genie_name' }}
+      TARGET_GENIE_NAME: ${{ inputs.target_genie_name || 'test_genie_name' }}
+
+      SOURCE_GENIE_SPACE_ID: ${{ inputs.source_space_id || vars.SOURCE_GENIE_SPACE_ID }}
+      TARGET_GENIE_SPACE_ID: ${{ inputs.target_space_id || vars.TARGET_GENIE_SPACE_ID }}
+
+      TEST_GENIE_PARENT_PATH: ${{ inputs.test_parent_path || vars.TEST_GENIE_PARENT_PATH }}
+      TEST_WAREHOUSE_ID: ${{ vars.TEST_WAREHOUSE_ID }}
+
+      GIT_FOLDER_PATH: ${{ inputs.git_folder_path || vars.DATABRICKS_GIT_FOLDER_PATH }}
+
+      # Use a generic resource key. Change only if the repository requires it.
+      RESOURCE_KEY: genie_agent
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Install Databricks CLI
+        # Pin this action to a reviewed commit SHA before production use.
+        uses: databricks/setup-cli@main
+        with:
+          version: "1.18.0"
+
+      - name: Validate required configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required_vars=(
+            DEV_DATABRICKS_HOST
+            TEST_DATABRICKS_HOST
+            ARM_TENANT_ID
+            ARM_CLIENT_ID
+            ARM_CLIENT_SECRET
+            TEST_GENIE_PARENT_PATH
+          )
+
+          for variable_name in "${required_vars[@]}"; do
+            if [[ -z "${!variable_name:-}" ]]; then
+              echo "Missing required configuration: ${variable_name}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Export development Genie and deploy to test
+        shell: bash
+        run: bash scripts/promote_genie.sh
+
+      - name: Commit exported bundle
+        if: ${{ inputs.commit_bundle }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add \
+            "resources/${RESOURCE_KEY}.genie_space.yml" \
+            "src/${RESOURCE_KEY}.geniespace.json"
+
+          if git diff --cached --quiet; then
+            echo "Bundle files are already current."
+          else
+            git commit -m "Promote Genie agent configuration [skip ci]"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
+      - name: Update Databricks Git folder
+        if: ${{ env.GIT_FOLDER_PATH != '' }}
+        shell: bash
+        env:
+          DATABRICKS_HOST: ${{ vars.TEST_DATABRICKS_HOST }}
+        run: |
+          set -euo pipefail
+          databricks repos update "$GIT_FOLDER_PATH" --branch "$GITHUB_REF_NAME"
