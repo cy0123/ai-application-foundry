@@ -1,0 +1,15 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.env
+.env.*
+.DS_Store
+.idea/
+.streamlit/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
