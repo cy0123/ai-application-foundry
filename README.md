@@ -62,6 +62,7 @@ A Python Streamlit app that loads a generic bar chart dashboard. Compare sample 
 Stop the server with `Ctrl+C`. Deactivate the virtual environment with `deactivate`.
 
 ## Glean chat
+<img width="1294" height="738" alt="Screenshot 2026-09-25 at 11 34 36 AM" src="https://github.com/user-attachments/assets/42755a66-06a6-4528-9a7d-4e9af73bf9e3" />
 
 The bottom chat widget on `glean_interactive_dashboard.py` calls Glean Chat with a snapshot of the current dashboard table and filters. Authentication uses the OAuth 2 authorization-code flow:
 
